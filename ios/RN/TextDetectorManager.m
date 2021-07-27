@@ -97,29 +97,112 @@
 
 @end
 #else
+#import <Vision/Vision.h>
 
 @interface TextDetectorManager ()
+@property(nonatomic, assign) float scaleX;
+@property(nonatomic, assign) float scaleY;
 @end
 
 @implementation TextDetectorManager
 
 - (instancetype)init
 {
-  self = [super init];
-  return self;
+    if (self = [super init]) {
+    }
+    return self;
 }
 
-- (BOOL)isRealDetector
+-(BOOL)isRealDetector
 {
-  return false;
+    if (@available(iOS 13.0, *)) {
+        return true;
+    } else {
+        return false;
+    }
 }
 
-- (void)findTextBlocksInFrame:(UIImage *)image scaleX:(float)scaleX scaleY:(float) scaleY completed:(postRecognitionBlock)completed;
+- (void)findTextBlocksInFrame:(UIImage *)uiImage scaleX:(float)scaleX scaleY:(float) scaleY completed: (void (^)(NSArray * result)) completed
 {
-  NSLog(@"TextDetector not installed, stub used!");
-  NSArray *features = @[@"Error, Text Detector not installed"];
-  completed(features);
+    if (@available(iOS 13.0, *)) {
+        self.scaleX = scaleX;
+        self.scaleY = scaleY;
+        
+        CGSize size = uiImage.size;
+        
+        VNRecognizeTextRequest *textRequest = [[VNRecognizeTextRequest alloc] initWithCompletionHandler:^(VNRequest *request, NSError *error) {
+            if (error != nil) {
+                completed(@[]);
+                return;
+            }
+            
+            NSArray<VNRecognizedTextObservation *> * textObservations = request.results;
+            NSMutableArray *results = [NSMutableArray new];
+            
+            for (VNRecognizedTextObservation *textObservation in textObservations) {
+                VNRecognizedText *text = [[textObservation topCandidates:1] firstObject];
+                if (text == nil || text.confidence < 0.5) {
+                    continue;
+                }
+                
+                CGFloat minX = MIN(MIN(MIN(textObservation.topLeft.x, textObservation.bottomLeft.x), textObservation.topRight.x), textObservation.bottomRight.x) * size.width;
+                CGFloat maxX = MAX(MAX(MAX(textObservation.topLeft.x, textObservation.bottomLeft.x), textObservation.topRight.x), textObservation.bottomRight.x) * size.width;
+                
+                CGFloat minY = MIN(MIN(MIN(textObservation.bottomLeft.y, textObservation.bottomRight.y), textObservation.topLeft.y), textObservation.topRight.y) * size.height;
+                CGFloat maxY = MAX(MAX(MAX(textObservation.bottomLeft.y, textObservation.bottomRight.y), textObservation.topLeft.y), textObservation.topRight.y) * size.height;
+                
+                
+                [results addObject:@{
+                    @"type": @"block",
+                    @"value": text.string,
+                    @"bounds": [self processBounds:CGRectMake(minX, size.height - maxY, maxX - minX, maxY - minY)]
+                }];
+            }
+            
+            completed(results);
+            
+        }];
+        
+        textRequest.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
+        
+        // Language correction won't help recognizing phone numbers. It also
+        // makes recognition slower.
+        textRequest.usesLanguageCorrection = NO;
+        
+        VNImageRequestHandler *h = [[VNImageRequestHandler alloc] initWithCGImage:uiImage.CGImage options:@{}];
+        
+        
+        [h performRequests:@[textRequest] error:nil];
+    } else {
+        NSLog(@"TextDetector not installed, stub used!");
+        NSArray *features = @[@"Error, Text Detector not installed"];
+        completed(features);
+        return;
+    }
+}
+
+-(NSDictionary *)processBounds:(CGRect)bounds
+{
+    float width = bounds.size.width * _scaleX;
+    float height = bounds.size.height * _scaleY;
+    float originX = bounds.origin.x * _scaleX;
+    float originY = bounds.origin.y * _scaleY;
+    NSDictionary *boundsDict =
+    @{
+        @"size" :
+            @{
+                @"width" : @(width),
+                @"height" : @(height)
+            },
+        @"origin" :
+            @{
+                @"x" : @(originX),
+                @"y" : @(originY)
+            }
+    };
+    return boundsDict;
 }
 
 @end
+
 #endif
